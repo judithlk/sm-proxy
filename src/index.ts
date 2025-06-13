@@ -1,51 +1,54 @@
 import express from 'express';
-import axios from 'axios';
+import * as http from 'http';
+import * as https from 'https';
 import cors from 'cors';
-import dotenv from 'dotenv';
-
-dotenv.config();
-console.log('BACKEND_URL:', process.env.BACKEND_URL);
-
 
 const app = express();
 
-// Middleware
+const BACKEND_URL = 'https://smart-waste-backend-wsmj.onrender.com';
+
 app.use(cors());
-app.use(express.json()); // Replaces body-parser
+app.use(express.json());
 
-// Environment-based backend URL
-const BACKEND_URL = process.env.BACKEND_URL || 'https://smart-waste-backend-wsmj.onrender.com';
-
-// Root route for health check
+// Health check
 app.get('/', (req, res) => {
-  res.send('Smart Waste Proxy is running ✅');
+  res.send('Proxy is alive ✅');
 });
 
-// Forward PUT requests to backend
-app.put('/bins/:id', async (req, res) => {
-  try {
-    const response = await axios.put(
-      `${BACKEND_URL}/api/bins/${req.params.id}`,
-      req.body,
-      {
-        headers: {
-          Authorization: req.headers.authorization || '',
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+// Main route to receive POST and forward as PUT
+app.post('/bins/by-binId/:binId', (req, res) => {
+  const { binId } = req.params;
+  const bodyData = JSON.stringify(req.body);
 
-    res.status(response.status).send(response.data);
-  } catch (error: any) {
-    console.error('Proxy error:', error.response?.data || error.message);
-    res.status(error.response?.status || 500).send({
-      error: error.response?.data || 'Failed to forward request',
-    });
-  }
+  const options = {
+    hostname: 'smart-waste-backend-wsmj.onrender.com',
+    port: 443,
+    path: `/api/bins/by-binId/${binId}`,
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(bodyData),
+    },
+  };
+
+  console.log(`[Proxy] Sending PUT to: ${options.hostname}${options.path}`);
+  console.log(`[Proxy] Payload: ${bodyData}`);
+
+  const proxyReq = https.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('[Proxy Error]', err.message);
+    res.status(500).json({ error: 'Proxy failed' });
+  });
+
+  proxyReq.write(bodyData);
+  proxyReq.end();
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Proxy server running on port ${PORT}`);
+  console.log(`🚀 Proxy server running on http://localhost:${PORT}`);
 });
